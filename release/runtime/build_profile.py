@@ -60,6 +60,25 @@ def build(identity, output, clang=20):
     stdlib = Path(sysconfig.get_path('stdlib'))
     shutil.copytree(stdlib, root / 'usr/lib' / stdlib.name,
                     ignore=shutil.ignore_patterns('dist-packages', 'site-packages', '__pycache__', 'test', 'tests', 'idlelib', 'tkinter'))
+    development = ('libpython3.12-dev', 'libdrm-dev', 'libgbm-dev', 'libdbus-1-dev', 'libglib2.0-dev')
+    for package in development:
+      files = subprocess.check_output(['dpkg-query', '-L', package], text=True).splitlines()
+      for name in files:
+        source = Path(name)
+        if not source.is_file() or not name.startswith('/usr/'):
+          continue
+        if '/include/' in name or name.endswith('.pc'):
+          target = root / name.lstrip('/'); target.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(source, target)
+          if name.endswith('.pc'):
+            text = target.read_text()
+            levels = len(target.parent.relative_to(root / 'usr').parts)
+            text = re.sub(r'(?m)^prefix=/usr$', 'prefix=${pcfiledir}/' + '/'.join(['..'] * levels), text)
+            target.write_text(text)
+        elif name.endswith('.so'):
+          copy_binary(source, root / name.lstrip('/'))
+    if not (root / 'usr/include/python3.12/Python.h').is_file():
+      raise RuntimeError('Python development ABI headers are missing')
     for shared in (root / 'usr/lib' / stdlib.name).rglob('*.so'):
       # Discover transitive dependencies without changing extension modules.
       found = subprocess.run(['ldd', str(shared)], capture_output=True, text=True)
@@ -97,7 +116,8 @@ def build(identity, output, clang=20):
     (root / 'bin/uv').chmod(0o755)
     metadata = {'id': identity, 'arch': 'aarch64', 'python': platform.python_version(), 'glibc_min': '2.39',
                 'clang': clang, 'runtime_abi': 1, 'interfaces': sorted(INTERFACES),
-                'libraries': sorted(libraries), 'python_path': 'usr/bin/' + py.name, 'uv_path': 'bin/uv'}
+                'libraries': sorted(libraries | {'python-dev', 'drm-dev', 'gbm-dev', 'dbus-dev'}),
+                'python_path': 'usr/bin/' + py.name, 'uv_path': 'bin/uv'}
     (root / 'profile.json').write_bytes(canonical(metadata))
     packages = subprocess.check_output(['dpkg-query', '-W', '-f=${Package}\t${Version}\n'], text=True)
     (root / 'provenance.json').write_bytes(canonical({'ubuntu': platform.freedesktop_os_release(),
@@ -105,7 +125,8 @@ def build(identity, output, clang=20):
        'github_run': os.environ.get('GITHUB_RUN_ID'), 'builder_commit': os.environ.get('GITHUB_SHA'),
        'contains_adapters': False, 'contains_models': False, 'contains_rootfs': False}))
     # Redistribution notices accompany the public Ubuntu/toolchain libraries.
-    for name in ('python3.12', f'clang-{clang}', f'libllvm{clang}', 'libgbm1', 'libdrm2', 'libdbus-1-3', 'libportaudio2', 'libssl3t64'):
+    for name in ('python3.12', 'libstdc++6', 'libgcc-s1', 'zlib1g', 'libffi8', 'libzstd1', 'libtinfo6',
+                 *development, f'clang-{clang}', f'libllvm{clang}', 'libgbm1', 'libdrm2', 'libdbus-1-3', 'libportaudio2', 'libssl3t64'):
       notice = Path('/usr/share/doc') / name / 'copyright'
       if notice.exists():
         target = root / 'share/licenses' / (name + '.copyright'); target.parent.mkdir(parents=True, exist_ok=True)
