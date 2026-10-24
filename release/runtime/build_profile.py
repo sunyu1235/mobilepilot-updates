@@ -95,6 +95,13 @@ def build(identity, output, clang=20):
     shutil.copytree(resources, root / f'usr/lib/clang/{clang}')
     for name, mode in [('clang', ''), ('clang++', '--driver-mode=g++')]:
       (root / 'bin' / name).write_text('#!/bin/sh\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
+          'export LD_LIBRARY_PATH="$ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
+          'INCLUDES="$ROOT/usr/include:$ROOT/usr/include/aarch64-linux-gnu:$ROOT/usr/include/python3.12:'
+          '$ROOT/usr/include/libdrm:$ROOT/usr/include/dbus-1.0:$ROOT/usr/include/glib-2.0:'
+          '$ROOT/usr/lib/aarch64-linux-gnu/dbus-1.0/include:$ROOT/usr/lib/aarch64-linux-gnu/glib-2.0/include"\n'
+          'export C_INCLUDE_PATH="$INCLUDES${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"\n'
+          'export CPLUS_INCLUDE_PATH="$INCLUDES${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"\n'
+          'export LIBRARY_PATH="$ROOT/usr/lib/aarch64-linux-gnu:$ROOT/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"\n'
           f'exec "$ROOT/usr/bin/clang-{clang}" -resource-dir "$ROOT/usr/lib/clang/{clang}" {mode} "$@"\n')
       (root / 'bin' / name).chmod(0o755)
     for library in ('libdrm.so.2', 'libgbm.so.1', 'libdbus-1.so.3', 'libportaudio.so.2'):
@@ -116,7 +123,7 @@ def build(identity, output, clang=20):
     (root / 'bin/uv').chmod(0o755)
     metadata = {'id': identity, 'arch': 'aarch64', 'python': platform.python_version(), 'glibc_min': '2.39',
                 'clang': clang, 'runtime_abi': 1, 'interfaces': sorted(INTERFACES),
-                'libraries': sorted(libraries | {'python-dev', 'drm-dev', 'gbm-dev', 'dbus-dev'}),
+                'libraries': sorted(libraries | {'python-dev', 'drm-dev', 'gbm-dev', 'dbus-dev', 'toolchain-relocatable'}),
                 'python_path': 'usr/bin/' + py.name, 'uv_path': 'bin/uv'}
     (root / 'profile.json').write_bytes(canonical(metadata))
     packages = subprocess.check_output(['dpkg-query', '-W', '-f=${Package}\t${Version}\n'], text=True)
